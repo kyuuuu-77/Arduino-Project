@@ -1,103 +1,66 @@
-#include <Wire.h>
-#include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
-#include <SoftwareSerial.h>
-// #include "HX711.h"
+#include <HX711.h>
+#include "SoftwareSerial.h"
 
 // 핀 설정
 #define buzz 27
 #define DOUT 25  //엠프 데이터 아웃 핀 넘버 선언
 #define CLK 26
-#define BATTERY_PIN 34  // 배터리 전압을 측정할 핀 (ADC 입력 핀)
+#define BATTERY_PIN 34  // 배터리 전압을 측정할 핀 (ADC 포트)
 
-#define SCREEN_WIDTH 128  // OLED 디스플레이의 가로 해상도
-#define SCREEN_HEIGHT 32  // OLED 디스플레이의 세로 해상도
-#define OLED_RESET -1     // 리셋 핀이 필요하지 않으면 -1로 설정
-
-// LCD
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
-
+// esp32 동작에 필요한 전역 변수들
 float calibration_factor = 4900;  //캘리브레이션 값
-// HX711 scale(DOUT, CLK);           //엠프 핀 선언
+float bat_max;
+float bat_min;
+float voltage;                    // 배터리 전압
+int sensorValue;
+int battery;                      // 배터리 퍼센트
+double weight = 0;                // 측정된 무게 값
 
-
-int battery = 40;
-double weight = 18.1;
-int i = 0;
-int sensorValue;   // 아날로그 값 읽기 (ADC 34번 핀)
-float voltage;     // 측정된 전압에 곱하기 2를 하여 실제 전압 계산
-String readData;
-
-String line2;
-String line3;
-String line4;
-
+// 블루투스 설정
 SoftwareSerial bluetooth(16, 17);
 
-int cnt = 0;
+// 무게 센서 설정
+HX711 scale(DOUT, CLK);           //엠프 핀 선언
 
 void setup() {
-  // (SDA: GPIO 33, SCK: GPIO 32)
-  Wire.begin(33, 32);
-
   Serial.begin(9600);
   bluetooth.begin(9600);
 
   pinMode(buzz, OUTPUT);
 
-  // scale.set_scale();                    //무게 측정용 초기화
-  // scale.tare();                         //Reset the scale to 0
-  // scale.set_scale(calibration_factor);  //스케일 지정
-  Serial.println("ready");
-
-  // 디스플레이 초기화
-  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {  // I2C 주소는 보통 0x3C
-    Serial.println(F("SSD1306 allocation failed"));
-    for (;;)
-      ;  // 초기화 실패 시 멈춤
-  }
+  scale.set_scale();                    //무게 측정용 초기화
+  scale.tare();                         //Reset the scale to 0
+  scale.set_scale(calibration_factor);  //스케일 지정
 
   pinMode(BATTERY_PIN, INPUT);
-
-  line3 = "NULL";
-  line4 = "NULL";
 }
 
-
-// 10.01 19시 갱신 -> 최대 충전전압 : 3.79, 최대 전압 : 3.68, 최소 전압 : 3.20
 void loop() {
-  // 디스플레이에 텍스트 출력
-  sensorValue = analogRead(BATTERY_PIN);         // 아날로그 값 읽기 (ADC 34번 핀)
-  voltage = sensorValue * (3.3 / 4095.0) * 2;  // 측정된 전압에 곱하기 2를 하여 실제 전압 계산
+  sensorValue = analogRead(BATTERY_PIN);  // 아날로그 값 읽기 (ADC 34번 핀)
+  Serial.println(sensorValue);
 
-  display.clearDisplay();
-  display.setTextSize(1);               // 텍스트 크기
-  display.setTextColor(SSD1306_WHITE);  // 텍스트 색상
-  display.setCursor(0, 0);              // 시작 위치 설정
-  display.println(F("Battery Voltage"));
-  line2 = String(voltage) + " V";
-  display.println(line2);  // 전압 출력
+  bat_max = 4096 * (2.1 / 3.3);
+  bat_min = 4096 * (1.6 / 3.3);
+  battery = (int)((sensorValue - bat_min) / (bat_max - bat_min) * 100);
+  voltage = ((battery * 0.005) + 1.6) * 2;  // 측정된 전압에 곱하기 2를 하여 실제 전압 계산
 
-  if (bluetooth.available() > 0) {
-    readData = bluetooth.readStringUntil('\n');  // 개행 문자까지 읽음
-    line3 = readData;
+  if (bluetooth.available() > 0) {  // 블루투스 사용 가능하면
+    String readData = bluetooth.readStringUntil('\n');  // 개행 문자까지 읽음
 
-    if (readData == "menu 1") {  // 벨을 울리기 시작
-      line4 = "ring_suc";
+    if (readData == "menu 1") {  // 벨 울리기
       bluetooth.println("ring_suc");
       delay(200);
-
       while (1) {
         digitalWrite(27, HIGH);
-        delay(400);
+        delay(500);
         digitalWrite(27, LOW);
-        delay(400);
+        delay(500);
+        Serial.println("벨울림");
 
         readData = bluetooth.readStringUntil('\n');
-
-        if (readData == "menu 2") { // 벨 울리기 중지
-          line4 = "ring_stop";
+        if (readData == "menu 2") {  // 벨 울리기 중지
           bluetooth.println("ring_stop");
+          Serial.println("벨꺼짐");
           break;
         }
       }
@@ -105,33 +68,23 @@ void loop() {
     }
 
     if (readData == "menu 3") {             // 무게 값을 전송
-      // scale.set_scale(calibration_factor);  //캘리브레이션 값 적용
+      scale.set_scale(calibration_factor);  //캘리브레이션 값 적용
       Serial.print("Reading: ");
-      Serial.println(String(weight) + " kg");
-      // Serial.print(scale.get_units(), 1);  //무게 출력
-      // weight = scale.get_units();
+      Serial.print(scale.get_units(), 1);  //무게 출력
+      Serial.print(" kg");                 //단위
+      Serial.println();
+      weight = scale.get_units();
 
-      line4 = String(weight) + " Kg";
+      Serial.println(String(weight));
       bluetooth.println(String(weight));
-
-      weight += 1.4;
       delay(200);
     }
 
-    if (readData == "menu 4") {  // 배터리 상태를 전송
-      if (battery > 100) {
-        battery = 0;
-      }
-      line4 = "Bat Status : " + String(battery);
-      bluetooth.println(String(battery)+"/"+String(voltage));
-      battery += 10;
-      delay(200);
+    if (readData == "menu 4") {  // 배터리 상태 전송
+      Serial.println(String(battery) + "/" + String(voltage));
+      bluetooth.println(String(battery) + "/" + String(voltage));
     }
   }
-
-  display.println(line3);
-  display.println(line4);
-  display.display();  // 화면에 출력 (업데이트)
 
   delay(500);
 }
