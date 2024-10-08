@@ -67,7 +67,7 @@ void loop() {
     }
     delay(200);
   }
-
+  
   if (bluetooth.available() > 0 && auth) {              // 블루투스 사용 가능하면 (인증후)
     String readData = bluetooth.readStringUntil('\n');  // 개행 문자까지 읽음
 
