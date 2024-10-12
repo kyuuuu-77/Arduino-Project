@@ -40,10 +40,10 @@ void setup() {
 
 void loop() {
   sensorValue = analogRead(BATTERY_PIN);  // 아날로그 값 읽기 (ADC 34번 핀)
-  sensorValue += 80;
+  sensorValue += 68;
 
-  bat_max = 4095 * (2.05 / 3.3);  // 4.1V -> 완충
-  bat_min = 4095 * (1.65 / 3.3);  // 3.3V -> 방전
+  bat_max = 4095 * (2 / 3.3);  // 4.0V -> 완충
+  bat_min = 4095 * (1.6 / 3.3);  // 3.2V -> 방전
 
   voltage = 6.6 * (sensorValue / 4095.);
   battery = (int)((sensorValue - bat_min) / (bat_max - bat_min) * 100);
@@ -55,29 +55,34 @@ void loop() {
       String readData = bluetooth.readStringUntil('\n');  // 개행 문자까지 읽음
       Serial.println(readData);
 
-      if (readData == " " || readData.startsWith("CONNECT")) {
-        Serial.println("데이터 무시");
-      } else if (readData == password) {
+      if (readData.startsWith("auth_")) {
+        Serial.println("auth 진입!");
+        if (readData == "auth_" + password) {
+          auth = true;
+          Serial.println("인증 성공!!!");
+          bluetooth.println("auth_suc");
+        } else {
+          auth = false;
+          Serial.println("인증 실패!!!");
+          bluetooth.println("auth_fail");
+        }
+        delay(200);
+      } else if (readData.startsWith("menu")) {   // 앱에서 인증하고 다시 시도하게 해야함
         auth = true;
-        Serial.println("인증 성공!!!");
+        Serial.println("menu 진입!");
         bluetooth.println("auth_suc");
-      } else {
-        auth = false;
-        Serial.println("인증 실패!!!");
-        bluetooth.println("auth_fail");
       }
-      delay(200);
     }
-    delay(500);
-  } else {
-    if (bluetooth.available() > 0) {  // 인증후
+  }
+  else {
+    if (bluetooth.available() > 0) {                      // 인증후
       String readData = bluetooth.readStringUntil('\n');  // 개행 문자까지 읽음
       Serial.println(readData);
 
       if (readData.startsWith("DISCONNECT")) {
         Serial.println("인증 취소!!!");
         auth = false;
-      } else if (readData == password) {
+      } else if (readData == "auth_" + password) {
         auth = true;
         Serial.println("인증 성공!!!");
         bluetooth.println("auth_suc");
@@ -122,12 +127,10 @@ void loop() {
         } else if (battery < 0) {
           battery = 0;
         }
-
         Serial.println(String(battery) + "/" + String(voltage));
         bluetooth.println(String(battery) + "/" + String(voltage));
       }
     }
-
-    delay(500);
   }
+  delay(500);
 }
