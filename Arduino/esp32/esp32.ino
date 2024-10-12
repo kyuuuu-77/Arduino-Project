@@ -5,7 +5,7 @@
 #define buzz 27
 #define DOUT 25  //엠프 데이터 아웃 핀 넘버 선언
 #define CLK 26
-#define BATTERY_PIN 34  // 배터리 전압을 측정할 핀 (ADC 포트)
+#define BATTERY_PIN 14  // 배터리 전압을 측정할 핀 (ADC 포트)
 
 // esp32 동작에 필요한 전역 변수들
 float calibration_factor = 4900;  //캘리브레이션 값
@@ -40,43 +40,54 @@ void setup() {
 
 void loop() {
   sensorValue = analogRead(BATTERY_PIN);  // 아날로그 값 읽기 (ADC 34번 핀)
-  Serial.println(sensorValue);
+  sensorValue += 68;
 
-  bat_max = 4096 * (2.1 / 3.3);
-  bat_min = 4096 * (1.6 / 3.3);
+  bat_max = 4095 * (2 / 3.3);  // 4.0V -> 완충
+  bat_min = 4095 * (1.6 / 3.3);  // 3.2V -> 방전
+
+  voltage = 6.6 * (sensorValue / 4095.);
   battery = (int)((sensorValue - bat_min) / (bat_max - bat_min) * 100);
-  voltage = ((battery * 0.005) + 1.6) * 2;  // 측정된 전압에 곱하기 2를 하여 실제 전압 계산
 
-  if (bluetooth.available() > 0 && !auth) {             // 블루투스 사용 가능하면 (인증전)
-    String readData = bluetooth.readStringUntil('\n');  // 개행 문자까지 읽음
+  Serial.println(String(sensorValue) + " => " + String(battery) + " %, " + String(voltage) + " V");
 
-    Serial.println(readData);
+  if (!auth) {  // 인증전
+    if (bluetooth.available() > 0) {
+      String readData = bluetooth.readStringUntil('\n');  // 개행 문자까지 읽음
+      Serial.println(readData);
 
-    if (readData == " " || readData.startsWith("CONNECT")) {
-      Serial.println("데이터 무시");
-    } else {
-      if (readData == password) {
+      if (readData.startsWith("auth_")) {
+        Serial.println("auth 진입!");
+        if (readData == "auth_" + password) {
+          auth = true;
+          Serial.println("인증 성공!!!");
+          bluetooth.println("auth_suc");
+        } else {
+          auth = false;
+          Serial.println("인증 실패!!!");
+          bluetooth.println("auth_fail");
+        }
+        delay(200);
+      } else if (readData.startsWith("menu")) {   // 앱에서 인증하고 다시 시도하게 해야함
+        auth = true;
+        Serial.println("menu 진입!");
+        bluetooth.println("auth_suc");
+      }
+    }
+  }
+  else {
+    if (bluetooth.available() > 0) {                      // 인증후
+      String readData = bluetooth.readStringUntil('\n');  // 개행 문자까지 읽음
+      Serial.println(readData);
+
+      if (readData.startsWith("DISCONNECT")) {
+        Serial.println("인증 취소!!!");
+        auth = false;
+      } else if (readData == "auth_" + password) {
         auth = true;
         Serial.println("인증 성공!!!");
         bluetooth.println("auth_suc");
-      } else {
-        auth = false;
-        Serial.println("인증 실패!!!");
-        bluetooth.println("auth_fail");
       }
-    }
-    delay(200);
-  }
-  
-  if (bluetooth.available() > 0 && auth) {              // 블루투스 사용 가능하면 (인증후)
-    String readData = bluetooth.readStringUntil('\n');  // 개행 문자까지 읽음
 
-    if (readData.startsWith("DISCONNECT")) {
-      Serial.println("인증 취소!!!");
-      auth = false;
-    }
-
-    if (auth) {
       if (readData == "menu 1") {  // 벨 울리기
         bluetooth.println("ring_suc");
         delay(200);
@@ -111,11 +122,15 @@ void loop() {
       }
 
       if (readData == "menu 4") {  // 배터리 상태 전송
+        if (battery > 100) {
+          battery = 100;
+        } else if (battery < 0) {
+          battery = 0;
+        }
         Serial.println(String(battery) + "/" + String(voltage));
         bluetooth.println(String(battery) + "/" + String(voltage));
       }
     }
   }
-
   delay(500);
 }
