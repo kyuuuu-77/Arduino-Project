@@ -1,4 +1,4 @@
-#include <HX711.h>
+#include "HX711.h"
 #include "SoftwareSerial.h"
 
 // 핀 설정
@@ -6,6 +6,7 @@
 #define DOUT 25  //엠프 데이터 아웃 핀 넘버 선언
 #define CLK 26
 #define BATTERY_PIN 14  // 배터리 전압을 측정할 핀 (ADC 포트)
+#define CHARGE_PIN 13   // 충전 여부를 측정할 핀(ADC 포트)
 
 // esp32 동작에 필요한 전역 변수들
 float calibration_factor = 4900;  //캘리브레이션 값
@@ -13,8 +14,10 @@ float bat_max;
 float bat_min;
 float voltage;  // 배터리 전압
 int sensorValue;
-int battery;        // 배터리 퍼센트
-double weight = 0;  // 측정된 무게 값
+int chargeValue;
+int battery;            // 배터리 퍼센트
+double weight = 0;      // 측정된 무게 값
+bool charging = false;  // 충전 상태 여부
 
 String password = "qwerty1234";  // 초기 비밀번호
 boolean auth = false;            // 인증 여부
@@ -36,13 +39,16 @@ void setup() {
   scale.set_scale(calibration_factor);  //스케일 지정
 
   pinMode(BATTERY_PIN, INPUT);
+  pinMode(CHARGE_PIN, INPUT);
 }
 
 void loop() {
   sensorValue = analogRead(BATTERY_PIN);  // 아날로그 값 읽기 (ADC 34번 핀)
   sensorValue += 68;
 
-  bat_max = 4095 * (2 / 3.3);  // 4.0V -> 완충
+  chargeValue = analogRead(CHARGE_PIN);  // 아날로그 값 읽기 (ADC 35번 핀)
+
+  bat_max = 4095 * (2 / 3.3);    // 4.0V -> 완충
   bat_min = 4095 * (1.6 / 3.3);  // 3.2V -> 방전
 
   voltage = 6.6 * (sensorValue / 4095.);
@@ -67,15 +73,14 @@ void loop() {
           bluetooth.println("auth_fail");
         }
         delay(200);
-      } else if (readData.startsWith("menu")) {   // 앱에서 인증하고 다시 시도하게 해야함
+      } else if (readData.startsWith("menu")) {  // 앱에서 인증하고 다시 시도하게 해야함
         auth = true;
         Serial.println("menu 진입!");
         bluetooth.println("auth_suc");
       }
     }
-  }
-  else {
-    if (bluetooth.available() > 0) {                      // 인증후
+  } else {  // 인증후
+    if (bluetooth.available() > 0) {
       String readData = bluetooth.readStringUntil('\n');  // 개행 문자까지 읽음
       Serial.println(readData);
 
@@ -110,13 +115,9 @@ void loop() {
 
       if (readData == "menu 3") {             // 무게 값을 전송
         scale.set_scale(calibration_factor);  //캘리브레이션 값 적용
-        Serial.print("Reading: ");
-        Serial.print(scale.get_units(), 1);  //무게 출력
-        Serial.print(" kg");                 //단위
-        Serial.println();
         weight = scale.get_units();
 
-        Serial.println(String(weight));
+        Serial.println(String(weight) + " Kg");
         bluetooth.println(String(weight));
         delay(200);
       }
@@ -127,8 +128,17 @@ void loop() {
         } else if (battery < 0) {
           battery = 0;
         }
-        Serial.println(String(battery) + "/" + String(voltage));
-        bluetooth.println(String(battery) + "/" + String(voltage));
+        if (chargeValue >= 1500) {
+          charging = true;
+          Serial.println("충전중...");
+          Serial.println(String(battery) + "+" + "/" + String(voltage));
+          bluetooth.println(String(battery) + "+" + "/" + String(voltage));
+        } else {
+          charging = false;
+          Serial.println("충전중 아님!!!");
+          Serial.println(String(battery) + "/" + String(voltage));
+          bluetooth.println(String(battery) + "/" + String(voltage));
+        }
       }
     }
   }
