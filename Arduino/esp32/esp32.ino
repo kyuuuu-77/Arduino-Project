@@ -44,11 +44,11 @@ void setup() {
 
 void loop() {
   sensorValue = analogRead(BATTERY_PIN);  // 아날로그 값 읽기 (ADC 34번 핀)
-  sensorValue += 68;
+  sensorValue += 72;
 
   chargeValue = analogRead(CHARGE_PIN);  // 아날로그 값 읽기 (ADC 35번 핀)
 
-  bat_max = 4095 * (2 / 3.3);    // 4.0V -> 완충
+  bat_max = 4095 * (2.0 / 3.3);    // 4.0V -> 완충
   bat_min = 4095 * (1.6 / 3.3);  // 3.2V -> 방전
 
   voltage = 6.6 * (sensorValue / 4095.);
@@ -91,6 +91,10 @@ void loop() {
         auth = true;
         Serial.println("인증 성공!!!");
         bluetooth.println("auth_suc");
+      } else if (readData.startsWith("change")) {
+        password = readData.substring(7);
+        Serial.println("새로운 인증번호 => " + password);
+        bluetooth.println("change_suc");
       }
 
       if (readData == "menu 1") {  // 벨 울리기
