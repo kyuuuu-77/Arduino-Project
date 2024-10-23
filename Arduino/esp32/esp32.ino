@@ -1,16 +1,17 @@
 #include "HX711.h"
 #include "SoftwareSerial.h"
-#include "bmi160.h"
-#include "Wire.h"
 #include "Preferences.h"
 
 // 핀 설정
 #define buzz 27
 #define DOUT 25  //엠프 데이터 아웃 핀 넘버 선언
 #define CLK 26
-#define BATTERY_PIN 14        // 배터리 전압을 측정할 핀 (ADC 포트)
-#define CHARGE_PIN 13         // 충전 여부를 측정할 핀(ADC 포트)
-#define BMI160_I2C_ADDR 0x68  // I2C 주소 설정
+#define BATTERY_PIN 14  // 배터리 전압을 측정할 핀 (ADC 포트)
+#define CHARGE_PIN 13   // 충전 여부를 측정할 핀(ADC 포트)
+
+#define Acc_X 33
+#define Acc_Y 34
+#define Acc_Z 35
 
 // esp32 동작에 필요한 전역 변수들
 float calibration_factor = 4900;  //캘리브레이션 값
@@ -28,9 +29,6 @@ bool lockMode = false;  // 캐리어 잠금 여부
 String password = "qwerty1234";  // 초기 비밀번호
 boolean auth = false;            // 인증 여부
 
-// 자이로 가속도 구조체
-struct bmi160_dev sensor;
-
 // 블루투스 설정
 SoftwareSerial bluetooth(16, 17);
 
@@ -40,39 +38,9 @@ HX711 scale(DOUT, CLK);  //엠프 핀 선언
 // NVS에 데이터 저장
 Preferences preferences;
 
-int8_t i2cRead(uint8_t dev_id, uint8_t reg_addr, uint8_t *data, uint16_t len) {
-  Wire.beginTransmission(dev_id);
-  Wire.write(reg_addr);
-  Wire.endTransmission(false);  // Repeated start for reading
-  Wire.requestFrom(dev_id, len);
-
-  for (int i = 0; i < len; i++) {
-    data[i] = Wire.read();
-  }
-
-  return 0;
-}
-
-int8_t i2cWrite(uint8_t dev_id, uint8_t reg_addr, uint8_t *data, uint16_t len) {
-  Wire.beginTransmission(dev_id);
-  Wire.write(reg_addr);
-  for (int i = 0; i < len; i++) {
-    Wire.write(data[i]);
-  }
-  Wire.endTransmission();
-
-  return 0;
-}
-
-// 지연 함수
-void delayMs(uint32_t period) {
-  delay(period);
-}
-
 void setup() {
   Serial.begin(115200);
   bluetooth.begin(9600);
-  Wire.begin();
 
   pinMode(buzz, OUTPUT);
 
@@ -83,34 +51,9 @@ void setup() {
   pinMode(BATTERY_PIN, INPUT);
   pinMode(CHARGE_PIN, INPUT);
 
-  sensor.id = BMI160_I2C_ADDR;  // I2C 주소 설정
-  sensor.read = i2cRead;
-  sensor.write = i2cWrite;
-  sensor.delay_ms = delayMs;
-  sensor.intf = BMI160_I2C_INTF;  // 인터페이스 타입 지정
-
-  // BMI160 초기화
-  int8_t rslt = bmi160_init(&sensor);
-  if (rslt == BMI160_OK) {
-    Serial.println("BMI160 초기화 성공");
-  } else {
-    Serial.print("BMI160 초기화 실패, 코드: ");
-    Serial.println(rslt);
-  }
-
-  // 가속도 및 자이로 센서 설정
-  sensor.accel_cfg.odr = BMI160_ACCEL_ODR_1600HZ;
-  sensor.accel_cfg.range = BMI160_ACCEL_RANGE_2G;
-  sensor.accel_cfg.bw = BMI160_ACCEL_BW_NORMAL_AVG4;
-  sensor.accel_cfg.power = BMI160_ACCEL_NORMAL_MODE;
-
-  sensor.gyro_cfg.odr = BMI160_GYRO_ODR_3200HZ;
-  sensor.gyro_cfg.range = BMI160_GYRO_RANGE_2000_DPS;
-  sensor.gyro_cfg.bw = BMI160_GYRO_BW_NORMAL_MODE;
-  sensor.gyro_cfg.power = BMI160_GYRO_NORMAL_MODE;
-
-  // 센서 구성 업데이트
-  bmi160_set_sens_conf(&sensor);
+  pinMode(Acc_X, INPUT);
+  pinMode(Acc_Y, INPUT);
+  pinMode(Acc_Z, INPUT);
 
   // NVS 초기화
   preferences.begin("nvs_storage", false);
@@ -128,6 +71,7 @@ void setup() {
   } else {
     lockMode = false;
   }
+  lockMode = true;
   preferences.end();
 }
 
@@ -143,30 +87,24 @@ void loop() {
   voltage = 6.6 * (sensorValue / 4095.);
   battery = (int)((sensorValue - bat_min) / (bat_max - bat_min) * 100);
 
-  Serial.println(String(sensorValue) + " => " + String(battery) + " %, " + String(voltage) + " V");
-
   if (lockMode) {
-    struct bmi160_sensor_data accel;
-    struct bmi160_sensor_data gyro;
+    int Val_X = analogRead(Acc_X);
+    int Val_Y = analogRead(Acc_Y);
+    int Val_Z = analogRead(Acc_Z);
 
-    // 가속도 및 자이로 데이터 읽기
-    bmi160_get_sensor_data(BMI160_ACCEL_SEL | BMI160_GYRO_SEL, &accel, &gyro, &sensor);
+    Serial.print("X : " + String(Val_X));
+    Serial.print(" | Y : " + String(Val_Y));
+    Serial.println(" | Z : " + String(Val_Z));
 
-    // 가속도 데이터 출력 (mg)
-    Serial.print("Accel X: ");
-    Serial.print(accel.x);
-    Serial.print(" Accel Y: ");
-    Serial.print(accel.y);
-    Serial.print(" Accel Z: ");
-    Serial.println(accel.z);
-
-    // 자이로 데이터 출력 (°/s)
-    Serial.print("Gyro X: ");
-    Serial.print(gyro.x);
-    Serial.print(" Gyro Y: ");
-    Serial.print(gyro.y);
-    Serial.print(" Gyro Z: ");
-    Serial.println(gyro.z);
+    if (Val_X < 1500 || Val_X > 1600) {
+      digitalWrite(27, HIGH);
+      delay(500);
+      digitalWrite(27, LOW);
+      delay(500);
+      Serial.println("벨울림");
+    }
+  } else {
+    Serial.println(String(sensorValue) + " => " + String(battery) + " %, " + String(voltage) + " V");
   }
 
   if (!auth) {  // 인증전
